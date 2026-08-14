@@ -1,0 +1,7 @@
+*.csv
+*.pt
+*.out
+__pycache__/
+csn/runs/
+runs/
+datasets/
