@@ -71,12 +71,7 @@ def main():
     # ----------------------------- Environment & Config ---------------------------------- #
     load_dotenv()
     DATASETS_FOLDER = os.environ["DATASETS_FOLDER"]
-    #if args.original:
-        #datasets = ['maestro', 'smd', 'maps_synth', 'maps_ENSTDkAm', 'maps_ENSTDkCl', 'musicnet']
-    #else:
-        #datasets = ['maestro', 'smd', 'maps_synth']
-
-    datasets = [args.dataset_name]
+    datasets = ['magnatagatune', 'jamendo']
 
     #----------------------Load the models once--------------------------#
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -89,49 +84,34 @@ def main():
         print(f"\nProcessing: {dataset}")
 
         root_dir = os.path.join(DATASETS_FOLDER, dataset)
-        original_audio_dir = os.path.join(root_dir, "audios")
-        original_audio_clap_dir = os.path.join(root_dir, "audios_clap")
+        audios_dir = os.path.join(root_dir, "audios")
+        clap_features_dir = os.path.join(root_dir, "clap_features")
+        os.makedirs(clap_features_dir, exist_ok=True)
 
-        if args.original:
-            synthesized_midi_dir = os.path.join(root_dir, "synthesized_original_midi")
-            corrupt_midi_clap_dir = os.path.join(root_dir, "original_midi_clap")
-        else:
-            synthesized_midi_dir = os.path.join(root_dir, "synthesized_midi")
-            corrupt_midi_clap_dir = os.path.join(root_dir, "corrupt_midi_clap")
-                
+        #Create subdirs for extracted features and create a list of audio files to process
+        subfolders = os.listdir(audios_dir)
+        audio_files = []
+        for subfolder in subfolders:
+            subfolder_path = os.path.join(audios_dir, subfolder)
+            audio_files.extend([os.path.join(subfolder, f) for f in os.listdir(subfolder_path)])
 
-        os.makedirs(corrupt_midi_clap_dir, exist_ok=True)
-        os.makedirs(original_audio_clap_dir, exist_ok=True)
+            #create save subdir
+            os.makedirs(os.path.join(clap_features_dir, subfolder), exist_ok=True)
 
-        #----------------------Extract CLAP from original audio ----------------#
-        audio_files = os.listdir(original_audio_dir)
+        #----------------------Extract CLAP from audios ----------------#
         tam_original = len(audio_files)
         for i, file in enumerate(audio_files):
             file_name = os.path.splitext(file)[0] + ".npy"
-            save_path = os.path.join(original_audio_clap_dir, file_name)
+            save_path = os.path.join(clap_features_dir, file_name)
             
             if os.path.exists(save_path):
                 print(f"CLAP embedding already exists for {file_name}, skipping.")
                 continue
 
-            emb = model.get_audio_tokens(os.path.join(original_audio_dir, file))
+            emb = model.get_audio_tokens(os.path.join(audios_dir, file))
             np.save(save_path, emb.squeeze().detach().cpu().numpy())
             print(f"{i+1}/{tam_original}")
             
-        #----------------------Extract CLAP of synthesized audio from corrupt MIDIs----------------#
-        audio_files = os.listdir(synthesized_midi_dir)
-        tam_corrupt = len(audio_files)
-        for i, file in enumerate(audio_files):
-            file_name = os.path.splitext(file)[0] + ".npy"
-            save_path = os.path.join(corrupt_midi_clap_dir, file_name)
-            
-            if os.path.exists(save_path):
-                print(f"CLAP embedding already exists for {file_name}, skipping.")
-                continue
-
-            emb = model.get_audio_tokens(os.path.join(synthesized_midi_dir, file))
-            np.save(save_path, emb.squeeze().detach().cpu().numpy())
-            print(f"{i+1}/{tam_corrupt}")
 
 if __name__ == "__main__":
     print("começo")
