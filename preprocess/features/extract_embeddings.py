@@ -231,7 +231,7 @@ def main():
     DATASETS_FOLDER = os.environ["DATASETS_FOLDER"]
     datasets = ['jamendo', 'magnatagatune']
     HF_PATH = os.environ["HF_PATH"]
-    NUM_PROCESSES = 15
+    NUM_PROCESSES = 10
 
     #main loop
     for dataset in datasets:
