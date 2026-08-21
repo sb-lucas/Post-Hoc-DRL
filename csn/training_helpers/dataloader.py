@@ -16,13 +16,13 @@ import torch.nn as nn
 import ast
 
 class TripletDataset(Dataset):
-    def __init__(self, backbone, DATASETS_FOLDER, all_songs, split):
+    def __init__(self, backbone, DATASETS_FOLDER, all_songs, split, pooling):
         if backbone == "mert":
-            self.embeddings_folder = f"{DATASETS_FOLDER}/jamendo/mert_features"
+            self.embeddings_folder = f"{DATASETS_FOLDER}/jamendo/downsampled_mert_features"
         elif backbone == "clap":
-            self.embeddings_folder = f"{DATASETS_FOLDER}/jamendo/clap_features/tokens/"
+            self.embeddings_folder = f"{DATASETS_FOLDER}/jamendo/downsampled_clap_features"
         elif backbone == "muq":
-            self.embeddings_folder = f"{DATASETS_FOLDER}/jamendo/muq_features"
+            self.embeddings_folder = f"{DATASETS_FOLDER}/jamendo/downsampled_muq_features"
         
         self.condition_mapping = {
             'genre':0,
@@ -34,20 +34,34 @@ class TripletDataset(Dataset):
         os.makedirs("cache", exist_ok=True)
 
         self.audio_cache = {}
-        cache_file_path = f"cache/cache_{backbone}_{split}.pt"
+        cache_file_path = f"cache/cache_{backbone}_{pooling}_{split}.pt"
         if os.path.exists(cache_file_path):
             print("Loading pre-computed audio cache...")
-            self.audio_cache = torch.load(cache_file_path, map_location="cpu")
+            print("cache_file_path = ", cache_file_path)
+            self.audio_cache = torch.load(cache_file_path, map_location="cpu", weights_only=True)
         else:
-            for i, song in enumerate(all_songs):
-                print(f"song = {song}: ", end='\r')
-                print(f"Pre-loading audio embeddings: {i+1}/{len(all_songs)}. song = {song}: ", end='\r')
-                song_id = os.path.splitext(song)[0]  # Remove the file extension to get the song ID
-                embedding_path = os.path.join(self.embeddings_folder, f"{song_id}.npy")
-                embedding = torch.from_numpy(np.load(embedding_path)).float().squeeze()
-                self.audio_cache[song_id] = (embedding)
+            if pooling == "attention":
+                #load the way it is; collate_fn handles padding and CSN does pooling
+                for i, song in enumerate(all_songs):
+                    print(f"song = {song}: ", end='\r')
+                    print(f"Pre-loading audio embeddings: {i+1}/{len(all_songs)}. song = {song}: ", end='\r')
+                    song_id = os.path.splitext(song)[0]  # Remove the file extension to get the song ID
+                    embedding_path = os.path.join(self.embeddings_folder, f"{song_id}.npy")
+                    embedding = torch.from_numpy(np.load(embedding_path)).float().squeeze()
+                    self.audio_cache[song_id] = (embedding)
+            elif pooling == "mean":
+                #load, but pool
+                for i, song in enumerate(all_songs):
+                    print(f"song = {song}: ", end='\r')
+                    print(f"Pre-loading audio embeddings: {i+1}/{len(all_songs)}. song = {song}: ", end='\r')
+                    song_id = os.path.splitext(song)[0]  # Remove the file extension to get the song ID
+                    embedding_path = os.path.join(self.embeddings_folder, f"{song_id}.npy")
+                    embedding = torch.from_numpy(np.load(embedding_path)).float().squeeze()
+                    embedding = embedding.mean(dim=0) #mean pooling
+                    self.audio_cache[song_id] = (embedding)
 
             #save cache
+            print("\n\nsaving audio cache to disk...")
             torch.save(self.audio_cache, cache_file_path)
 
 
@@ -56,14 +70,16 @@ class TripletDatasetTrain(TripletDataset):
         self.pooling = pooling
 
         self.df = pd.read_csv(f"{DATASETS_FOLDER}/jamendo/jamendo_train_split.csv")
-        self.artist_to_idx = {artist_id: idx for idx, artist_id in enumerate(self.df['ARTIST_ID'].unique())}
+        #get a debug sample of 100
+        self.df = self.df.sample(n=100, random_state=42).reset_index(drop=True)
 
-        #aquiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiii
-        self.df = self.df.iloc[:100]  # first 100 rows just to test the code, remove later
+
+        self.artist_to_idx = {artist_id: idx for idx, artist_id in enumerate(self.df['ARTIST_ID'].unique())}
 
         all_songs = self.df["PATH"].tolist()
 
-        super().__init__(backbone, DATASETS_FOLDER, all_songs, "train")
+
+        super().__init__(backbone, DATASETS_FOLDER, all_songs, "train", pooling)
         
         # Unique tag vocabularies per category
         self.genre_vocab = sorted(list(set([t for tags in self.df["GENRE_TAGS"] for t in ast.literal_eval(tags)])))
@@ -78,9 +94,6 @@ class TripletDatasetTrain(TripletDataset):
         song_id = os.path.splitext(row["PATH"])[0]  # Remove the file extension to get the song ID
 
         emb = self.audio_cache[song_id]  # (N, emb_size)
-        if self.pooling == "mean":
-            emb = emb.mean(dim=0)          # (emb_size,)
-        # "attention" -> leave as (N, emb_size); collate_fn handles padding
         
         # Build multi-hot tag vectors
         g_tags = ast.literal_eval(row["GENRE_TAGS"])
@@ -101,22 +114,15 @@ class TripletDatasetVal(TripletDataset):
         self.pooling = pooling
 
         self.triplets_df = pd.read_csv(f"{DATASETS_FOLDER}/jamendo/jamendo_val_triplets.csv")
-
-        #aquiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiii
-        self.triplets_df = self.triplets_df.iloc[:100]  # first 100 rows just to test the code, remove later
+        #get a debug sample of 100
+        self.triplets_df = self.triplets_df.sample(n=100, random_state=42).reset_index(drop=True)
 
         all_songs = pd.concat([self.triplets_df["anchor"], self.triplets_df["positive"], self.triplets_df["negative"]]).unique()
 
-        super().__init__(backbone, DATASETS_FOLDER, all_songs, "val")
+        super().__init__(backbone, DATASETS_FOLDER, all_songs, "val", pooling)
 
     def __len__(self):
         return len(self.triplets_df)
-
-    def _get_emb(self, song_id):
-        emb = self.audio_cache[song_id]
-        if self.pooling == "mean":
-            return emb.mean(dim=0)
-        return emb  # "attention" -> leave as (N, emb_size); collate_fn handles padding
 
     def __getitem__(self, idx):
         row = self.triplets_df.iloc[idx]
@@ -125,8 +131,8 @@ class TripletDatasetVal(TripletDataset):
         negative = os.path.splitext(row['negative'])[0]
         positive = os.path.splitext(row['positive'])[0]
         
-        emb_anchor = self._get_emb(anchor)
-        emb_negative = self._get_emb(negative)  
-        emb_positive = self._get_emb(positive)
+        emb_anchor = self.audio_cache[anchor]
+        emb_negative = self.audio_cache[negative]
+        emb_positive = self.audio_cache[positive]
 
         return emb_anchor, emb_negative, emb_positive, self.condition_mapping[row['category']]

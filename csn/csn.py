@@ -16,7 +16,7 @@ class AttentionPool(nn.Module):
         return pooled
 
 class ConditionalSimNet(nn.Module):
-    def __init__(self, embeddingnet, n_conditions, embedding_size, pooling, learnedmask=True):
+    def __init__(self, embeddingnet, n_conditions, embedding_size, pooling, learnedmask):
         """ embeddingnet: The network that projects the inputs into an embedding of embedding_size
             n_conditions: Integer defining number of different similarity notions
             embedding_size: Number of dimensions of the embedding output from the embeddingnet
@@ -54,16 +54,12 @@ class ConditionalSimNet(nn.Module):
         if self.pooling == "attention":
             x = self.pool(x, attn_mask)   # (B, N, D) -> (B, D)
 
-        print(f"After attention pooling, x shape: {x.shape}")  # Debugging line to check the shape of x
         embedded_x = self.embeddingnet(x)  # (B, D) -> (B, D)
-        print(f"embedded_x shape: {embedded_x.shape}")  # Debugging line to check the shape of embedded_x
         mask = self.masks(c)
-        print(f"mask shape: {mask.shape}")  # Debugging line to check the shape of mask
 
         if self.learnedmask:
             mask = torch.nn.functional.relu(mask)
 
         masked_embedding = embedded_x * mask
 
-        print(f"masked_embedding shape: {masked_embedding.shape}")  # Debugging line to check the shape of masked_embedding
         return masked_embedding, mask, embedded_x

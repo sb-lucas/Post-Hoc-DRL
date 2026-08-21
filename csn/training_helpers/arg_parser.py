@@ -2,6 +2,7 @@ import argparse
 from email import parser
 
 #nohup python3 -u main.py --backbone clap --variation none --learn_masks --epochs 100 > clap.out & 
+#python3 main.py --epochs 1 --backbone clap --variation mlp --pooling attention --learn_masks
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Experiment Configuration")
