@@ -9,8 +9,13 @@ from dotenv import load_dotenv
 import re
 import ast
 
-def generate_triplets(df, category_name, num_triplets=5000, seed=42):
-    random.seed(seed)
+clean_name = {
+    'GENRE_TAGS': 'genre',
+    'INSTRUMENT_TAGS': 'instrument',
+    'MOOD_TAGS': 'mood'
+}
+
+def generate_triplets(df, category_name, num_triplets=5000):
 
     # Keep tracks containing at least one tag in this category
     cat_df = df[df[category_name].apply(lambda tags: len(tags) > 0)].copy()
@@ -37,11 +42,10 @@ def generate_triplets(df, category_name, num_triplets=5000, seed=42):
         anchor_artist = artists.loc[anchor_id]
         anchor_tags = tag_sets.loc[anchor_id]
 
-        # 2. Select Positive: shares >=1 tag AND comes from a DIFFERENT artist
-        diff_anchor_artist = artists != anchor_artist
+        # 2. Select Positive: shares >=1 tag
         shares_tag = tag_sets.apply(lambda s: not s.isdisjoint(anchor_tags))
-        pos_candidates = cat_df[diff_anchor_artist & shares_tag].index.tolist()
-
+        pos_candidates = [cid for cid in cat_df[shares_tag].index.tolist() if cid != anchor_id]
+        
         if not pos_candidates:
             continue
 
@@ -63,7 +67,7 @@ def generate_triplets(df, category_name, num_triplets=5000, seed=42):
                 "anchor": anchor_id,
                 "positive": pos_id,
                 "negative": neg_id,
-                "category": category_name,
+                "category": clean_name[category_name],
             }
         )
 
@@ -73,27 +77,36 @@ def generate_triplets(df, category_name, num_triplets=5000, seed=42):
 
     return triplets
 
-def main():
-    df = pd.read_csv("jamendo_test_split.csv")
-
+def triplets_from_df(df, save_path):
     # Ensure TAGS are Python lists
-    if isinstance(df["TAGS"].iloc[0], str):
-        df["TAGS"] = df["TAGS"].apply(ast.literal_eval)
-
-    # Populate category columns for each row
-    df["genre"] = df["TAGS"].apply(lambda tags: [tag for tag in tags if tag.startswith("genre---")])
-    df["instrument"] = df["TAGS"].apply(lambda tags: [tag for tag in tags if tag.startswith("instrument---")])
-    df["mood"] = df["TAGS"].apply(lambda tags: [tag for tag in tags if tag.startswith("mood/theme---")])
+    if isinstance(df["GENRE_TAGS"].iloc[0], str):
+        df["GENRE_TAGS"] = df["GENRE_TAGS"].apply(ast.literal_eval)
+    if isinstance(df["INSTRUMENT_TAGS"].iloc[0], str):
+        df["INSTRUMENT_TAGS"] = df["INSTRUMENT_TAGS"].apply(ast.literal_eval)
+    if isinstance(df["MOOD_TAGS"].iloc[0], str):
+        df["MOOD_TAGS"] = df["MOOD_TAGS"].apply(ast.literal_eval)
 
     test_benchmark = []
-    tag_categories = ['instrument', 'mood', 'genre']
+    tag_categories = ['INSTRUMENT_TAGS', 'MOOD_TAGS', 'GENRE_TAGS']
 
     for category in tag_categories:
         print(f'generating {category} triplets')
         test_benchmark.extend(generate_triplets(df, category, num_triplets=5000))
 
     test_benchmark_df = pd.DataFrame(test_benchmark)
-    test_benchmark_df.to_csv("jamendo_test_triplets.csv", index=False) 
+    test_benchmark_df.to_csv(save_path, index=False) 
+
+def main():
+    load_dotenv()
+    DATASETS_FOLDER = os.environ["DATASETS_FOLDER"]
+
+    random.seed(42)
+    
+    df_test = pd.read_csv(f"{DATASETS_FOLDER}/jamendo/jamendo_test_split.csv")
+    df_val = pd.read_csv(f"{DATASETS_FOLDER}/jamendo/jamendo_val_split.csv")
+
+    triplets_from_df(df_test, f"{DATASETS_FOLDER}/jamendo/jamendo_test_triplets.csv")
+    triplets_from_df(df_val, f"{DATASETS_FOLDER}/jamendo/jamendo_val_triplets.csv")
 
 if __name__ == "__main__":
     main()

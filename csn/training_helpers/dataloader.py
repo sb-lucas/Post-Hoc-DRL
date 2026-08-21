@@ -11,25 +11,24 @@ import sys, os
 import random
 import math
 import pickle
+import torch
+import torch.nn as nn
+import ast
 
 class TripletDataset(Dataset):
-    def __init__(self, backbone, split='train'):
+    def __init__(self, backbone, DATASETS_FOLDER, all_songs, split):
+        if backbone == "mert":
+            self.embeddings_folder = f"{DATASETS_FOLDER}/jamendo/mert_features"
+        elif backbone == "clap":
+            self.embeddings_folder = f"{DATASETS_FOLDER}/jamendo/clap_features/tokens/"
+        elif backbone == "muq":
+            self.embeddings_folder = f"{DATASETS_FOLDER}/jamendo/muq_features"
         
         self.condition_mapping = {
-            'instrument':0,
-            'genre':1,
-            'theme':2
+            'genre':0,
+            'instrument':1,
+            'mood':2
         }
-
-        if backbone == 'musicnn':
-            self.embeddings_folder = "/home/ldsbrandao/exp/diego/diego/final/data/extracted_features/musicnn/original"
-        elif backbone == 'clap':
-            self.embeddings_folder = "/home/ldsbrandao/exp/diego/diego/final/data/extracted_features/clap_global/original"
-
-        triplets_path = f'/home/ldsbrandao/exp/cerri/dataset/{split}_triplets.csv'
-        self.triplets_df = pd.read_csv(triplets_path)
-        
-        self.all_songs = pd.concat([self.triplets_df["anchor"], self.triplets_df["positive"], self.triplets_df["negative"]]).unique()
 
         #pre loading all audio embeddings
         os.makedirs("cache", exist_ok=True)
@@ -40,32 +39,94 @@ class TripletDataset(Dataset):
             print("Loading pre-computed audio cache...")
             self.audio_cache = torch.load(cache_file_path, map_location="cpu")
         else:
-            for i, song in enumerate(self.all_songs):
-                print(f"Pre-loading audio embeddings: {i+1}/{len(self.all_songs)}. song = {song}: ", end='\r')
-                song_id = song.split('.')[0]
+            for i, song in enumerate(all_songs):
+                print(f"song = {song}: ", end='\r')
+                print(f"Pre-loading audio embeddings: {i+1}/{len(all_songs)}. song = {song}: ", end='\r')
+                song_id = os.path.splitext(song)[0]  # Remove the file extension to get the song ID
                 embedding_path = os.path.join(self.embeddings_folder, f"{song_id}.npy")
                 embedding = torch.from_numpy(np.load(embedding_path)).float().squeeze()
-                embedding = F.normalize(embedding, dim=-1)
                 self.audio_cache[song_id] = (embedding)
 
             #save cache
             torch.save(self.audio_cache, cache_file_path)
 
-    def get_num_songs(self):
-        return len(self.all_songs)
+
+class TripletDatasetTrain(TripletDataset):
+    def __init__(self, backbone, DATASETS_FOLDER, pooling):
+        self.pooling = pooling
+
+        self.df = pd.read_csv(f"{DATASETS_FOLDER}/jamendo/jamendo_train_split.csv")
+        self.artist_to_idx = {artist_id: idx for idx, artist_id in enumerate(self.df['ARTIST_ID'].unique())}
+
+        #aquiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiii
+        self.df = self.df.iloc[:100]  # first 100 rows just to test the code, remove later
+
+        all_songs = self.df["PATH"].tolist()
+
+        super().__init__(backbone, DATASETS_FOLDER, all_songs, "train")
+        
+        # Unique tag vocabularies per category
+        self.genre_vocab = sorted(list(set([t for tags in self.df["GENRE_TAGS"] for t in ast.literal_eval(tags)])))
+        self.inst_vocab = sorted(list(set([t for tags in self.df["INSTRUMENT_TAGS"] for t in ast.literal_eval(tags)]))) 
+        self.mood_vocab = sorted(list(set([t for tags in self.df["MOOD_TAGS"] for t in ast.literal_eval(tags)])))
+
+    def __len__(self):
+        return len(self.df)
+
+    def __getitem__(self, idx):
+        row = self.df.iloc[idx]
+        song_id = os.path.splitext(row["PATH"])[0]  # Remove the file extension to get the song ID
+
+        emb = self.audio_cache[song_id]  # (N, emb_size)
+        if self.pooling == "mean":
+            emb = emb.mean(dim=0)          # (emb_size,)
+        # "attention" -> leave as (N, emb_size); collate_fn handles padding
+        
+        # Build multi-hot tag vectors
+        g_tags = ast.literal_eval(row["GENRE_TAGS"])
+        i_tags = ast.literal_eval(row["INSTRUMENT_TAGS"])
+        m_tags = ast.literal_eval(row["MOOD_TAGS"])
+
+        g_vec = torch.tensor([1.0 if t in g_tags else 0.0 for t in self.genre_vocab])
+        i_vec = torch.tensor([1.0 if t in i_tags else 0.0 for t in self.inst_vocab])
+        m_vec = torch.tensor([1.0 if t in m_tags else 0.0 for t in self.mood_vocab])
+
+        artist_id = torch.tensor(self.artist_to_idx[str(row["ARTIST_ID"])], dtype=torch.long)
+
+        return emb, i_vec, g_vec, m_vec, artist_id
+
+
+class TripletDatasetVal(TripletDataset):
+    def __init__(self, backbone, DATASETS_FOLDER, pooling):
+        self.pooling = pooling
+
+        self.triplets_df = pd.read_csv(f"{DATASETS_FOLDER}/jamendo/jamendo_val_triplets.csv")
+
+        #aquiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiii
+        self.triplets_df = self.triplets_df.iloc[:100]  # first 100 rows just to test the code, remove later
+
+        all_songs = pd.concat([self.triplets_df["anchor"], self.triplets_df["positive"], self.triplets_df["negative"]]).unique()
+
+        super().__init__(backbone, DATASETS_FOLDER, all_songs, "val")
 
     def __len__(self):
         return len(self.triplets_df)
 
+    def _get_emb(self, song_id):
+        emb = self.audio_cache[song_id]
+        if self.pooling == "mean":
+            return emb.mean(dim=0)
+        return emb  # "attention" -> leave as (N, emb_size); collate_fn handles padding
+
     def __getitem__(self, idx):
         row = self.triplets_df.iloc[idx]
 
-        anchor = row['anchor'].split('.')[0]
-        positive = row['positive'].split('.')[0]
-        negative = row['negative'].split('.')[0]
+        anchor = os.path.splitext(row['anchor'])[0]
+        negative = os.path.splitext(row['negative'])[0]
+        positive = os.path.splitext(row['positive'])[0]
         
-        emb_anchor = self.audio_cache[anchor]
-        emb_positive = self.audio_cache[positive]
-        emb_negative = self.audio_cache[negative]
+        emb_anchor = self._get_emb(anchor)
+        emb_negative = self._get_emb(negative)  
+        emb_positive = self._get_emb(positive)
 
-        return emb_anchor, emb_negative, emb_positive, self.condition_mapping[row['condition']]
+        return emb_anchor, emb_negative, emb_positive, self.condition_mapping[row['category']]

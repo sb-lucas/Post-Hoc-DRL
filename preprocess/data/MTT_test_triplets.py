@@ -278,8 +278,8 @@ def clean_tag_categories(tag_categories, clean_tags):
     return tag_categories_clean
 
 def generate_song_clean_triplets(df_clean, category_name, category_tags, num_triplets=5000, seed=42):
-    random.seed(seed)
 
+    #keep only rows that have at least one of the tags in the category
     valid_tags = [tag for tag in category_tags if tag in df_clean.columns]
     cat_df = df_clean[df_clean[valid_tags].sum(axis=1) > 0].copy()
 
@@ -308,7 +308,7 @@ def generate_song_clean_triplets(df_clean, category_name, category_tags, num_tri
         if not active_anchor_tags:
             continue
 
-        # 2. Select Positive: shares tag AND comes from a DIFFERENT song than Anchor
+        # 2. Select Positive: shares tag
         different_from_anchor_mask = cat_df["song_id"] != anchor_song_id
         pos_tag_mask = (cat_df[active_anchor_tags] == 1).any(axis=1)
         pos_candidates = cat_df[pos_tag_mask & different_from_anchor_mask].index
@@ -345,6 +345,8 @@ def generate_song_clean_triplets(df_clean, category_name, category_tags, num_tri
     return triplets
 
 def main():
+    random.seed(42)
+
     load_dotenv()
     DATASETS_FOLDER = os.environ["DATASETS_FOLDER"]
     df = pd.read_csv(f'{DATASETS_FOLDER}/magnatagatune/annotations_final.csv', sep='\t')
@@ -359,7 +361,7 @@ def main():
         test_benchmark.extend(generate_song_clean_triplets(df_clean, category, tags, num_triplets=5000))
 
     test_benchmark_df = pd.DataFrame(test_benchmark)
-    test_benchmark_df.to_csv("mtt_test_triplets.csv", index=False)
+    test_benchmark_df.to_csv(f'{DATASETS_FOLDER}/magnatagatune/mtt_test_triplets.csv', index=False)
 
 if __name__ == "__main__":
     main()

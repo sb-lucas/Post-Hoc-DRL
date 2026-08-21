@@ -10,76 +10,124 @@ import torch.nn.functional as F
 import torch.optim as optim
 import torch.backends.cudnn as cudnn
 from torch.utils.data import DataLoader
+from dotenv import load_dotenv
 
-from tripletnet import CS_Tripletnet
 from csn import ConditionalSimNet
-
-from training_helpers.dataloader import TripletDataset
+from variations import OneLayer, MLP
+from training_helpers.custom_collates import attention_train_collate_fn, attention_val_collate_fn, mean_train_collate_fn, mean_val_collate_fn
+from training_helpers.semihard_loss import SemiHardTripletLoss
+from training_helpers.dataloader import TripletDatasetTrain, TripletDatasetVal
 from training_helpers.arg_parser import parse_args
 from training_helpers.checkpoint import save_checkpoint
 from training_helpers.plot import plot_losses
 
-def train(tnet, dataloader, optimizer, device, triplet_loss):
-    tnet.train()
+def emb_to_device(emb_pair, device):
+    x, mask = emb_pair
+    x = x.to(device)
+    if mask is not None:
+        mask = mask.to(device)
+    return x, mask
+
+def train(csn_model, dataloader, optimizer, device, semi_hard_loss_fn, l_mask=1e-5, l_ortho=1e-3, l_emb=1e-5):
+    csn_model.train()
     epoch_loss = 0
 
-    for batch_index, (anchor, negative, positive, condition) in enumerate(dataloader):
-        print(f"Training - Batch {batch_index+1}/{len(dataloader)}", end='\r')
+    for batch_idx, (emb, i_vec, g_vec, m_vec, artist_ids) in enumerate(dataloader):
+        print(f"Training Online - Batch {batch_idx+1}/{len(dataloader)}", end="\r")
 
-        #to device
-        anchor, negative, positive, condition = anchor.to(device), negative.to(device), positive.to(device), condition.to(device)
+        emb = emb_to_device(emb, device)
+        i_vec, g_vec, m_vec = (i_vec.to(device), g_vec.to(device), m_vec.to(device))
+        artist_ids = artist_ids.to(device)
+        B = emb[0].size(0)
 
-        #forward pass
-        dist_neg, dist_pos, mask_norm = tnet(anchor, negative, positive, condition)
+        # 1. Condition Tensors: 0=genre, 1=instrument, 2=mood
+        c_genre = torch.full((B,), 0, dtype=torch.long, device=device)
+        c_inst = torch.full((B,), 1, dtype=torch.long, device=device)
+        c_mood = torch.full((B,), 2, dtype=torch.long, device=device)
 
-        #calculate loss
-        target = torch.ones_like(dist_neg)
+        # 2. Single forward pass per condition on the same unmasked embedding batch
+        
+        masked_emb_g, mask_g, emb_g = csn_model(emb, c_genre)
+        masked_emb_i, mask_i, emb_i = csn_model(emb, c_inst)
+        masked_emb_m, mask_m, emb_m = csn_model(emb, c_mood)
 
-        masks = F.relu(tnet.csn.masks.weight)
+        # 3. Compute GPU semi-hard triplet loss per dimension
+        triplet_loss_genre = semi_hard_loss_fn(masked_emb_g, g_vec, artist_ids)
+        triplet_loss_inst = semi_hard_loss_fn(masked_emb_i, i_vec, artist_ids)
+        triplet_loss_mood = semi_hard_loss_fn(masked_emb_m, m_vec, artist_ids)
+        triplet_loss = triplet_loss_genre + triplet_loss_inst + triplet_loss_mood
+
+        #average norms across the triplet
+        mask_norm = (mask_g.norm(p=1, dim=1).mean() + mask_i.norm(p=1, dim=1).mean() + mask_m.norm(p=1, dim=1).mean()) / 3
+        emb_norm = emb_g.norm(p=2, dim=1).mean() #since all embeddings are the same, we can just take one of them
+
+        #orthogonality regularization
+        masks = F.relu(csn_model.masks.weight)
         M = F.normalize(masks, dim=1)
         I = torch.eye(M.shape[0], device=M.device)
-        loss_ortho = ((M @ M.T - I)**2).sum()
+        loss_ortho = ((M @ M.T - I) ** 2).sum()
 
-        loss = triplet_loss(dist_neg, dist_pos, target) + (mask_norm * 1e-5) + (loss_ortho * 1e-3)
+        # 5. Combined Loss
+        total_loss = (triplet_loss + (mask_norm * l_mask) + (loss_ortho * l_ortho) + (emb_norm * l_emb))
 
-        #backward pass and optimization
         optimizer.zero_grad()
-        loss.backward()
+        total_loss.backward()
         optimizer.step()
 
-        #accumulate loss
-        epoch_loss += loss.item()
+        epoch_loss += total_loss.item()
 
-    epoch_loss /= len(dataloader)
-
-    return epoch_loss
+    return epoch_loss / len(dataloader)
 
 @torch.no_grad()
-def test(tnet, dataloader, device, triplet_loss):
-    tnet.eval()
+def test(csn_model, dataloader, device, triplet_loss_fn, l_mask=1e-5, l_ortho=1e-3, l_emb=1e-5):
+    csn_model.eval()
     epoch_loss = 0
 
     for batch_index, (anchor, negative, positive, condition) in enumerate(dataloader):
         print(f"Testing - Batch {batch_index+1}/{len(dataloader)}", end='\r')
 
         #to device
-        anchor, negative, positive, condition = anchor.to(device), negative.to(device), positive.to(device), condition.to(device)
+        anchor = emb_to_device(anchor, device)
+        negative = emb_to_device(negative, device)
+        positive = emb_to_device(positive, device)
+        condition = condition.to(device)
 
         #forward pass
-        dist_neg, dist_pos, mask_norm = tnet(anchor, negative, positive, condition)
+        masked_emb_anchor, mask_anchor, emb_anchor  = csn_model(anchor, condition)
+        masked_emb_negative, mask_negative, emb_negative = csn_model(negative, condition)
+        masked_emb_positive, mask_positive, emb_positive = csn_model(positive, condition)
+
+        #average norms across the triplet
+        mask_norm = mask_anchor.norm(p=1, dim=1).mean() # since all masks are the same, we can just take one of them
+        emb_norm = (emb_anchor.norm(p=2, dim=1).mean() + emb_negative.norm(p=2, dim=1).mean() + emb_positive.norm(p=2, dim=1).mean()) / 3
+
+        #get distances
+        dist_neg = F.pairwise_distance(masked_emb_anchor, masked_emb_negative, 2)
+        dist_pos = F.pairwise_distance(masked_emb_anchor, masked_emb_positive, 2)
+
+        #orthogonality regularization
+        masks = F.relu(csn_model.masks.weight)
+        M = F.normalize(masks, dim=1)
+        I = torch.eye(M.shape[0], device=M.device)
+        loss_ortho = ((M @ M.T - I) ** 2).sum()
 
         #calculate loss
         target = torch.ones_like(dist_neg)
-        loss = triplet_loss(dist_neg, dist_pos, target) + (mask_norm * 1e-5)
+        triplet_loss = triplet_loss_fn(dist_neg, dist_pos, target) 
+        total_loss = (triplet_loss + (mask_norm * l_mask) + (loss_ortho * l_ortho) + (emb_norm * l_emb))
 
         #accumulate loss
-        epoch_loss += loss.item()
+        epoch_loss += total_loss.item()
 
     epoch_loss /= len(dataloader)
+    print() # to clean \r from the last batch print
 
     return epoch_loss
 
 def main():
+    load_dotenv()
+    DATASETS_FOLDER = os.environ["DATASETS_FOLDER"]
+
     #--------------------------------------------------Parsing and Logging--------------------------------------------------#
     args = parse_args()
 
@@ -107,27 +155,44 @@ def main():
         f.write(f"Batch Size: {args.batch_size}\n")
         f.write(f"Learning Rate: {args.lr}\n")
         f.write(f"Epochs: {args.epochs}\n")
+        f.write(f"Variation: {args.variation}\n")
+        f.write(f"Learn Masks: {args.learn_masks}\n")
 
     #-------------------------------------------------Load Data----------------------------------------------#
-    train_loader = DataLoader(TripletDataset(backbone=args.backbone, split='train'), batch_size=args.batch_size, shuffle=True)
-    val_loader = DataLoader(TripletDataset(backbone=args.backbone, split='val'), batch_size=args.batch_size, shuffle=False)
-    test_loader = DataLoader(TripletDataset(backbone=args.backbone, split='test'), batch_size=args.batch_size, shuffle=False)
+    if args.pooling == "attention":
+        train_loader = DataLoader(TripletDatasetTrain(args.backbone, DATASETS_FOLDER, args.pooling), batch_size=args.batch_size, shuffle=True, collate_fn=attention_train_collate_fn)
+        val_loader = DataLoader(TripletDatasetVal(args.backbone, DATASETS_FOLDER, args.pooling), batch_size=args.batch_size, shuffle=False, collate_fn=attention_val_collate_fn)
+    elif args.pooling == "mean":
+        train_loader = DataLoader(TripletDatasetTrain(args.backbone, DATASETS_FOLDER, args.pooling), batch_size=args.batch_size, shuffle=True, collate_fn=mean_train_collate_fn)
+        val_loader = DataLoader(TripletDatasetVal(args.backbone, DATASETS_FOLDER, args.pooling), batch_size=args.batch_size, shuffle=False, collate_fn=mean_val_collate_fn)
+    else:
+        raise ValueError(f"Unsupported pooling method: {args.pooling}")
 
     #-------------------------------------------------Load Model----------------------------------------------#
     if args.backbone == 'clap':
-        dim_embed = 512
-    elif args.backbone == 'musicnn':
-        dim_embed = 200
+        embedding_size = 768
+    elif args.backbone == 'mert':
+        embedding_size = 768
+    elif args.backbone == 'muq':
+        embedding_size = 768
+    else:
+        raise ValueError(f"Unsupported backbone: {args.backbone}")
 
-    csn_model = ConditionalSimNet(n_conditions=3, embedding_size=dim_embed) 
-    tnet = CS_Tripletnet(csn_model)
+    if args.variation == "one_layer":
+        embeddingnet = OneLayer(dim=embedding_size)
+    elif args.variation == "mlp":
+        embeddingnet = MLP(dim=embedding_size)
+    elif args.variation == "none":
+        embeddingnet = nn.Identity()  # Pass-through layer (0 parameters)
+    else:
+        raise ValueError(f"Unsupported variation: {args.variation}")
 
-    csn_model = csn_model.to(device)
-    tnet = tnet.to(device)
+    csn_model = ConditionalSimNet(embeddingnet, args.n_conditions, embedding_size, args.learn_masks).to(device)
 
     #--------------------------------------------------Training Loop-----------------------------------------------#
-    triplet_loss = nn.MarginRankingLoss(margin=0.2)
-    optimizer = optim.Adam(tnet.parameters(), lr=args.lr)
+    val_loss_fn = nn.MarginRankingLoss(margin=0.1)
+    train_loss_fn = SemiHardTripletLoss(margin=0.1)
+    optimizer = optim.Adam(csn_model.parameters(), lr=args.lr)
 
     early_stop_patience = 5           
     early_stop_counter = 0 
@@ -145,13 +210,13 @@ def main():
             f.write(f"\n-----------Epoch {epoch}-----------\n")
         
         # train for one epoch
-        train_loss = train(tnet, train_loader, optimizer, device, triplet_loss)
+        train_loss = train(csn_model, train_loader, optimizer, device, train_loss_fn)
         train_losses.append(train_loss)
         with open(log_path, "a") as f:
             f.write(f"\nTreino: {train_loss}\n")
 
         # evaluate on validation set
-        val_loss = test(tnet, val_loader, device, triplet_loss)
+        val_loss = test(csn_model, val_loader, device, val_loss_fn)
         val_losses.append(val_loss)
         with open(log_path, "a") as f:
             f.write(f"\nValidação: {val_loss}\n")
@@ -161,7 +226,7 @@ def main():
         best_loss = min(val_loss, best_loss)
         state = { 
             'epoch': epoch, 
-            'state_dict': tnet.state_dict(), 
+            'state_dict': csn_model.state_dict(), 
             'best_loss': best_loss,
             'train_losses': train_losses,
             'val_losses': val_losses,
@@ -180,6 +245,7 @@ def main():
 
     #-------------- Plotting Losses --------------#
     plot_losses(train_losses, val_losses, save_dir, label='Loss')
+
 
 if __name__ == '__main__':
     main()    
