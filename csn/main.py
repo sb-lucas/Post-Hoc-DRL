@@ -117,7 +117,7 @@ def main():
 
     #--------------------------------------------------Parsing and Logging--------------------------------------------------#
     args = parse_args()
-    n_runs = 5
+    n_runs = 1
     for run in range(n_runs):
         print(f"\n\nStarting Run {run+1}/{n_runs}...\n")
 
@@ -133,7 +133,7 @@ def main():
 
         #--------------------------------------------------torch configs--------------------------------------------------#
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        seed = 42
+        seed = run
         random.seed(seed)
         np.random.seed(seed)
         torch.manual_seed(seed)
@@ -168,7 +168,7 @@ def main():
         elif args.backbone == 'mert':
             embedding_size = 768
         elif args.backbone == 'muq':
-            embedding_size = 768
+            embedding_size = 1024
         else:
             raise ValueError(f"Unsupported backbone: {args.backbone}")
 
@@ -188,9 +188,12 @@ def main():
         train_loss_fn = SemiHardTripletLoss(margin=0.1)
         optimizer = optim.Adam(csn_model.parameters(), lr=args.lr)
 
-        early_stop_patience = 5           
+        # cosine decay from args.lr down to ~0 over the full training run
+        scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
+
+        early_stop_patience = 20           
         early_stop_counter = 0 
-        early_stop_threshold = 0.001
+        early_stop_threshold = 0
 
         train_losses = []
         val_losses = []
@@ -214,6 +217,12 @@ def main():
             val_losses.append(val_loss)
             with open(log_path, "a") as f:
                 f.write(f"\nValidação: {val_loss}\n")
+
+            current_lr = optimizer.param_groups[0]['lr']
+            with open(log_path, "a") as f:
+                f.write(f"LR: {current_lr:.2e}\n")
+
+            scheduler.step()
 
             # remember best loss and save checkpoint
             is_best =  best_loss - val_loss > early_stop_threshold
@@ -239,7 +248,6 @@ def main():
 
         #-------------- Plotting Losses --------------#
         plot_losses(train_losses, val_losses, save_dir, label='Loss')
-
 
 if __name__ == '__main__':
     main()    

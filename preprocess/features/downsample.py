@@ -43,7 +43,7 @@ def main():
     DATASETS_FOLDER = os.environ["DATASETS_FOLDER"]
     datasets = ["jamendo", "magnatagatune"]
     models = ["clap", "mert", "muq"]
-    NUM_PROCESSES = 8
+    NUM_PROCESSES = 4
 
     # Main loop
     for dataset in datasets:

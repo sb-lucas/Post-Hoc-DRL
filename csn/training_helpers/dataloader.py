@@ -70,14 +70,8 @@ class TripletDatasetTrain(TripletDataset):
         self.pooling = pooling
 
         self.df = pd.read_csv(f"{DATASETS_FOLDER}/jamendo/jamendo_train_split.csv")
-        #get a debug sample of 100
-        self.df = self.df.sample(n=100, random_state=42).reset_index(drop=True)
-
-
         self.artist_to_idx = {artist_id: idx for idx, artist_id in enumerate(self.df['ARTIST_ID'].unique())}
-
         all_songs = self.df["PATH"].tolist()
-
 
         super().__init__(backbone, DATASETS_FOLDER, all_songs, "train", pooling)
         
@@ -114,11 +108,7 @@ class TripletDatasetVal(TripletDataset):
         self.pooling = pooling
 
         self.triplets_df = pd.read_csv(f"{DATASETS_FOLDER}/jamendo/jamendo_val_triplets.csv")
-        #get a debug sample of 100
-        self.triplets_df = self.triplets_df.sample(n=100, random_state=42).reset_index(drop=True)
-
         all_songs = pd.concat([self.triplets_df["anchor"], self.triplets_df["positive"], self.triplets_df["negative"]]).unique()
-
         super().__init__(backbone, DATASETS_FOLDER, all_songs, "val", pooling)
 
     def __len__(self):

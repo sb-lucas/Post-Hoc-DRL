@@ -35,26 +35,54 @@ def main():
 
     #choose the embedding dimension based on the backbone
     if args.backbone == 'clap':
-        dim_embed = 512
-    elif args.backbone == 'musicnn':
-        dim_embed = 200
+        embedding_size = 768
+    elif args.backbone == 'mert':
+        embedding_size = 768
+    elif args.backbone == 'muq':
+        embedding_size = 1024
+    else:
+        raise ValueError(f"Unsupported backbone: {args.backbone}")
+
+#     state = { 
+#     'epoch': epoch, 
+#     'state_dict': csn_model.state_dict(), 
+#     'best_loss': best_loss,
+#     'train_losses': train_losses,
+#     'val_losses': val_losses,
+#     'variation': args.variation,        # add this
+#     'embedding_size': embedding_size,   # add this
+#     'pooling': args.pooling,            # add this
+#     'n_conditions': args.n_conditions,  # add this
+#     'learn_masks': args.learn_masks,    # add this
+# }
+
+# checkpoint = torch.load(checkpoint_path, map_location=device)
+
+# if checkpoint['variation'] == "one_layer":
+#     embeddingnet = OneLayer(dim=checkpoint['embedding_size'])
+# elif checkpoint['variation'] == "mlp":
+#     embeddingnet = MLP(dim=checkpoint['embedding_size'])
+# elif checkpoint['variation'] == "none":
+#     embeddingnet = nn.Identity()
+
+# csn_model = ConditionalSimNet(embeddingnet, checkpoint['n_conditions'], checkpoint['embedding_size'], checkpoint['pooling'], checkpoint['learn_masks']).to(device)
+# csn_model.load_state_dict(checkpoint['state_dict'])
+
     
     #initialize the CSN model and the triplet network
-    csn_model = ConditionalSimNet(n_conditions=3, embedding_size=dim_embed) 
-    tnet = CS_Tripletnet(csn_model)
+    csn_model = ConditionalSimNet(embeddingnet, args.n_conditions, embedding_size, args.pooling, args.learn_masks).to(device)
 
     #load checkpoint
-    checkpoint_folder = f"/home/ldsbrandao/exp/cerri/csn/runs/{args.path}"
+    checkpoint_folder = os.path.join(RUNS_PATH, args.path)
     model_weights_complete_path = os.path.join(checkpoint_folder, "model_best.pth.tar")
     checkpoint = torch.load(model_weights_complete_path, map_location=device)
-    tnet.load_state_dict(checkpoint['state_dict'])
+    csn_model.load_state_dict(checkpoint['state_dict'])
 
     #to device
     csn_model = csn_model.to(device)
-    tnet = tnet.to(device)
 
     #get the learned masks from the CSN model
-    masks = F.relu(tnet.csn.masks.weight).to(device) #shape (3, embedding_dim)
+    masks = F.relu(csn.masks.weight).to(device) #shape (3, embedding_dim)
 
     #Calculate triplet score of each mask and the backbone over test triplets (separeted per triplet type)
     triplet_acc = triplet_score(test_loader, device, masks)
@@ -62,19 +90,13 @@ def main():
     df = pd.DataFrame(triplet_acc).T
     df.to_csv(os.path.join(checkpoint_folder, "triplet_scores.csv"), index=True)
 
-    #calculate sparsity and overlap of the learned masks
-    sparsity_dict, overlap_dict = mask_quality(masks)
-    sparsity_df = pd.DataFrame.from_dict(sparsity_dict, orient='index', columns=['sparsity'])
-    overlap_df = pd.DataFrame.from_dict(overlap_dict, orient='index', columns=['overlap'])
-    sparsity_df.to_csv(os.path.join(checkpoint_folder, "mask_sparsity.csv"))
-    overlap_df.to_csv(os.path.join(checkpoint_folder, "mask_overlap.csv"))
-
-    #calculate the dim sim score of each mask and the backbone over the dim sim dataset
-    dimsim_acc = evaluate_dimsim(args.backbone, masks)
-    dimsim_df = pd.DataFrame.from_dict(dimsim_acc, orient='index', columns=['dimsim_accuracy'])
-    dimsim_df.to_csv(os.path.join(checkpoint_folder, "dimsim_scores.csv"))
-
-
+    if args.learn_mask:
+        #calculate sparsity and overlap of the learned masks
+        sparsity_dict, overlap_dict = mask_quality(masks)
+        sparsity_df = pd.DataFrame.from_dict(sparsity_dict, orient='index', columns=['sparsity'])
+        overlap_df = pd.DataFrame.from_dict(overlap_dict, orient='index', columns=['overlap'])
+        sparsity_df.to_csv(os.path.join(checkpoint_folder, "mask_sparsity.csv"))
+        overlap_df.to_csv(os.path.join(checkpoint_folder, "mask_overlap.csv"))
 
 if __name__ == "__main__":
     main()

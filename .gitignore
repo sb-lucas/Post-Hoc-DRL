@@ -5,3 +5,9 @@ __pycache__/
 csn/runs/
 runs/
 datasets/
+.env
+runs-bagunça/
+*.log
+*.sh
+datasets_andre/
+datasets_andre

@@ -6,7 +6,7 @@ class OneLayer(nn.Module):
     """Single linear projection with residual connection, LayerNorm, GELU.
     Initialized near-identity so training starts close to the frozen embedding."""
 
-    def __init__(self, dim=768):
+    def __init__(self, dim):
         super().__init__()
         self.norm = nn.LayerNorm(dim)
         self.proj = nn.Linear(dim, dim)
@@ -20,13 +20,13 @@ class OneLayer(nn.Module):
         delta = self.act(self.proj(self.norm(x)))
         return x + delta
 
-
 class MLP(nn.Module):
     """2-layer MLP adapter with residual connection, LayerNorm, dropout.
     Initialized near-identity so training starts close to the frozen embedding."""
 
-    def __init__(self, dim=768, hidden_dim=768, dropout=0.1):
+    def __init__(self, dim, dropout=0.1):
         super().__init__()
+        hidden_dim = dim
         self.norm = nn.LayerNorm(dim)
         self.net = nn.Sequential(
             nn.Linear(dim, hidden_dim),
