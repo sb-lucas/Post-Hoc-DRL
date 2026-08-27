@@ -20,13 +20,7 @@ from training_helpers.dataloader import TripletDatasetTrain, TripletDatasetVal
 from training_helpers.arg_parser import parse_args
 from training_helpers.checkpoint import save_checkpoint
 from training_helpers.plot import plot_losses
-
-def emb_to_device(emb_pair, device):
-    x, mask = emb_pair
-    x = x.to(device)
-    if mask is not None:
-        mask = mask.to(device)
-    return x, mask
+from training_helpers.emb_to_device import emb_to_device
 
 def train(csn_model, dataloader, optimizer, device, semi_hard_loss_fn, l_mask=1e-5, l_ortho=1e-3, l_emb=1e-5):
     csn_model.train()
@@ -58,7 +52,7 @@ def train(csn_model, dataloader, optimizer, device, semi_hard_loss_fn, l_mask=1e
         triplet_loss = triplet_loss_genre + triplet_loss_inst + triplet_loss_mood
 
         #average norms across the triplet
-        mask_norm = (mask_g.norm(p=1, dim=1).mean() + mask_i.norm(p=1, dim=1).mean() + mask_m.norm(p=1, dim=1).mean()) / 3
+        mask_norm = (mask_g.norm(p=1, dim=1).mean() + mask_i.norm(p=1, dim=1).mean() + mask_m.norm(p=1, dim=1).mean())
         emb_norm = emb_g.norm(p=2, dim=1).mean() #since all embeddings are the same, we can just take one of them
 
         #orthogonality regularization
@@ -114,18 +108,34 @@ def test(csn_model, dataloader, device, triplet_loss_fn, l_mask=1e-5, l_ortho=1e
 def main():
     load_dotenv()
     DATASETS_FOLDER = os.environ["DATASETS_FOLDER"]
+    DATASETS_FEATURES_FOLDER = os.environ["DATASETS_FEATURES_FOLDER"]
 
     #--------------------------------------------------Parsing and Logging--------------------------------------------------#
     args = parse_args()
-    n_runs = 1
+    n_runs = 5
     for run in range(n_runs):
-        print(f"\n\nStarting Run {run+1}/{n_runs}...\n")
-
         timestamp = datetime.now().strftime("%m%d_%H%M%S")
         learn_masks_str = "learned_mask" if args.learn_masks else "fixed_mask"
-        experiment_name = f"{args.backbone}_{args.pooling}_{args.variation}_{learn_masks_str}_{timestamp}"
+        experiment_name = f"{args.backbone}_{args.pooling}_{args.variation}_{learn_masks_str}_run_{run}"
         
         save_dir = os.path.join("runs", experiment_name)
+        
+        print(f"\n\nStarting Experiment {experiment_name}/{n_runs}...\n")
+
+
+        #if the directory exists, the experiment has already started
+        if os.path.exists(save_dir):
+            #if the final plot has been created, it has finished
+            if any(f.endswith('.png') for f in os.listdir(save_dir)):
+                print(f"Experiment {experiment_name} already completed. Skipping...")
+                continue
+            # Otherwise, the experiment is still running. then delete the directory and start over
+            else:
+                print(f"Experiment {experiment_name} already exists but not completed. Deleting and starting over...")
+                import shutil
+                shutil.rmtree(save_dir)
+
+        #create/recreate the directory for the experiment and start/star over
         os.makedirs(save_dir, exist_ok=True)
 
         log_path = os.path.join(save_dir, "log.txt")
@@ -154,11 +164,11 @@ def main():
 
         #-------------------------------------------------Load Data----------------------------------------------#
         if args.pooling == "attention":
-            train_loader = DataLoader(TripletDatasetTrain(args.backbone, DATASETS_FOLDER, args.pooling), batch_size=args.batch_size, shuffle=True, collate_fn=attention_train_collate_fn)
-            val_loader = DataLoader(TripletDatasetVal(args.backbone, DATASETS_FOLDER, args.pooling), batch_size=args.batch_size, shuffle=False, collate_fn=attention_val_collate_fn)
+            train_loader = DataLoader(TripletDatasetTrain(args.backbone, DATASETS_FOLDER, DATASETS_FEATURES_FOLDER, args.pooling, 'jamendo'), batch_size=args.batch_size, shuffle=True, collate_fn=attention_train_collate_fn)
+            val_loader = DataLoader(TripletDatasetVal(args.backbone, DATASETS_FOLDER, DATASETS_FEATURES_FOLDER, args.pooling, 'jamendo', 'val'), batch_size=args.batch_size, shuffle=False, collate_fn=attention_val_collate_fn)
         elif args.pooling == "mean":
-            train_loader = DataLoader(TripletDatasetTrain(args.backbone, DATASETS_FOLDER, args.pooling), batch_size=args.batch_size, shuffle=True, collate_fn=mean_train_collate_fn)
-            val_loader = DataLoader(TripletDatasetVal(args.backbone, DATASETS_FOLDER, args.pooling), batch_size=args.batch_size, shuffle=False, collate_fn=mean_val_collate_fn)
+            train_loader = DataLoader(TripletDatasetTrain(args.backbone, DATASETS_FOLDER, DATASETS_FEATURES_FOLDER, args.pooling, 'jamendo'), batch_size=args.batch_size, shuffle=True, collate_fn=mean_train_collate_fn)
+            val_loader = DataLoader(TripletDatasetVal(args.backbone, DATASETS_FOLDER, DATASETS_FEATURES_FOLDER, args.pooling, 'jamendo', 'val'), batch_size=args.batch_size, shuffle=False, collate_fn=mean_val_collate_fn)
         else:
             raise ValueError(f"Unsupported pooling method: {args.pooling}")
 
@@ -243,11 +253,26 @@ def main():
                 early_stop_counter += 1
 
             if early_stop_counter >= early_stop_patience:
-                print(f"Early stopping triggered after {early_stop_patience} epochs with no improvement.")
+                print(f"Experiment {experiment_name} Early stopping triggered after {early_stop_patience} epochs with no improvement.")
                 break
 
         #-------------- Plotting Losses --------------#
         plot_losses(train_losses, val_losses, save_dir, label='Loss')
+
+        # Free memory before next run
+        del train_loader
+        del val_loader
+        del csn_model
+        del optimizer
+        del scheduler
+        del train_loss_fn
+        del val_loss_fn
+
+        import gc
+        gc.collect()
+
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
 if __name__ == '__main__':
     main()    

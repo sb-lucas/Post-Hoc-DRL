@@ -11,6 +11,10 @@ from dotenv import load_dotenv
 import argparse
 from muq import MuQ
 
+corrupted_files = ["9/american_baroque-dances_and_suites_of_rameau_and_couperin-25-le_petit_rien_xiveme_ordre_couperin-88-117", 
+                   "8/jacob_heringman-josquin_des_prez_lute_settings-19-gintzler__pater_noster-204-233",
+                   "6/norine_braun-now_and_zen-08-gently-117-146"]
+
 def get_chunk_starts(total_samples, chunk_size):
     """Returns start indices for chunk_size-length windows covering the audio,
     with the last window anchored to the end (overlapping, not padded)."""
@@ -164,7 +168,7 @@ class HuggingFaceClap:
 
         print(f"CLAP full-song sequence for {os.path.basename(audio_path)}. Full_sequence shape: {full_sequence.shape}, Global embedding shape: {global_emb.shape}")
 
-        return global_emb, full_sequence
+        return full_sequence
 
 
 def clap_worker_fn(ModelClass, proc_id, audio_files, audios_dir, features_dir, hf_path):
@@ -172,7 +176,6 @@ def clap_worker_fn(ModelClass, proc_id, audio_files, audios_dir, features_dir, h
     and processes its allocated slice of audio files.
     """
 
-    global_feature_dir, tokens_feature_dir = features_dir
 
     model = ModelClass(hf_path=hf_path)
     total_files = len(audio_files)
@@ -181,12 +184,10 @@ def clap_worker_fn(ModelClass, proc_id, audio_files, audios_dir, features_dir, h
     #----------------------Extract features from audios ----------------#
     for i, file in enumerate(audio_files):
         file_name = os.path.splitext(file)[0] + ".npy"
-        global_save_path = os.path.join(global_feature_dir, file_name)
-        tokens_save_path = os.path.join(tokens_feature_dir, file_name)
+        save_path = os.path.join(features_dir, file_name)
 
-        global_emb, tokens = model.get_audio_tokens(os.path.join(audios_dir, file))
-        np.save(global_save_path, global_emb.squeeze().detach().cpu().numpy())   
-        np.save(tokens_save_path, tokens.squeeze().detach().cpu().numpy())
+        tokens = model.get_audio_tokens(os.path.join(audios_dir, file))
+        np.save(save_path, tokens.squeeze().detach().cpu().numpy())
 
         print(f"[Process {proc_id}] Progress: {i + 1}/{total_files}")
 
@@ -228,7 +229,7 @@ def main():
 
     # ----------------------------- Environment & Config ---------------------------------- #
     load_dotenv()
-    DATASETS_FOLDER = os.environ["DATASETS_FOLDER"]
+    DATASETS_FEATURES_FOLDER = os.environ["DATASETS_FEATURES_FOLDER"]
     datasets = ['jamendo', 'magnatagatune']
     HF_PATH = os.environ["HF_PATH"]
     NUM_PROCESSES = 10
@@ -237,18 +238,11 @@ def main():
     for dataset in datasets:
         print(f"\nProcessing: {dataset}")
 
-        root_dir = os.path.join(DATASETS_FOLDER, dataset)
+        root_dir = os.path.join(DATASETS_FEATURES_FOLDER, dataset)
         audios_dir = os.path.join(root_dir, "audios")
 
-        if args.model == "clap":
-            global_dir = os.path.join(root_dir, features_folder, "global")
-            tokens_dir = os.path.join(root_dir, features_folder, "tokens")
-            os.makedirs(global_dir, exist_ok=True)
-            os.makedirs(tokens_dir, exist_ok=True)
-            features_dir = (global_dir, tokens_dir)
-        else:
-            features_dir = os.path.join(root_dir, features_folder)
-            os.makedirs(features_dir, exist_ok=True)
+        features_dir = os.path.join(root_dir, features_folder)
+        os.makedirs(features_dir, exist_ok=True)
 
         #Create subdirs for extracted features and create a list of audio files to process
         subfolders = os.listdir(audios_dir)
@@ -257,29 +251,21 @@ def main():
             subfolder_path = os.path.join(audios_dir, subfolder)
 
             #create save subdir
-
-            if args.model == "clap":
-                global_dir, tokens_dir = features_dir
-                os.makedirs(os.path.join(global_dir, subfolder), exist_ok=True)
-                os.makedirs(os.path.join(tokens_dir, subfolder), exist_ok=True)
-            else:
-                os.makedirs(os.path.join(features_dir, subfolder), exist_ok=True)
+            os.makedirs(os.path.join(features_dir, subfolder), exist_ok=True)
     
             #create a list of audio files to process - only unprocessed files
             for f in os.listdir(subfolder_path):
                 rel_file_path = os.path.join(subfolder, f)
                 save_file_name = os.path.splitext(rel_file_path)[0] + ".npy"
 
-                if args.model == "clap":
-                    global_dir, tokens_dir = features_dir
-                    global_save_path = os.path.join(global_dir, save_file_name)
-                    tokens_save_path = os.path.join(tokens_dir, save_file_name)
-                    if not os.path.exists(global_save_path) or not os.path.exists(tokens_save_path):
-                        audio_files.append(rel_file_path)
-                else:   
-                    save_path = os.path.join(features_dir, save_file_name)
-                    if not os.path.exists(save_path):
-                        audio_files.append(rel_file_path)
+                #if file is corrupted, skip it
+                if os.path.splitext(rel_file_path)[0] in corrupted_files:
+                    print(f"Skipping corrupted file: {rel_file_path}")
+                    continue
+
+                save_path = os.path.join(features_dir, save_file_name)
+                if not os.path.exists(save_path):
+                    audio_files.append(rel_file_path)
 
         #----------------------Run the worker function in parallel--------------------------#
         total_audios = len(audio_files)

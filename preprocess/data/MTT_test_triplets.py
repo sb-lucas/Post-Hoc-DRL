@@ -277,14 +277,17 @@ def clean_tag_categories(tag_categories, clean_tags):
 
     return tag_categories_clean
 
-def generate_song_clean_triplets(df_clean, category_name, category_tags, num_triplets=5000, seed=42):
+def generate_song_clean_triplets(df_clean, clip_info_df, category_name, category_tags, num_triplets=5000, seed=42):
+
+    random.seed(seed)
 
     #keep only rows that have at least one of the tags in the category
     valid_tags = [tag for tag in category_tags if tag in df_clean.columns]
     cat_df = df_clean[df_clean[valid_tags].sum(axis=1) > 0].copy()
+    cat_df = cat_df.set_index("mp3_path")
 
-    if "clip_id" in cat_df.columns:
-        cat_df = cat_df.set_index("mp3_path")
+    artist_map = clip_info_df.set_index("mp3_path")["artist"].to_dict()
+    cat_df["artist"] = cat_df.index.map(artist_map)
 
     all_clip_ids = cat_df.index.tolist()
     triplets = []
@@ -298,18 +301,16 @@ def generate_song_clean_triplets(df_clean, category_name, category_tags, num_tri
         # 1. Select Anchor
         anchor_id = random.choice(all_clip_ids)
         anchor_row = cat_df.loc[anchor_id]
-        anchor_song_id = anchor_row["song_id"]
+        anchor_artist = anchor_row["artist"]
 
         active_anchor_tags = anchor_row[valid_tags]
-        active_anchor_tags = active_anchor_tags[
-            active_anchor_tags == 1
-        ].index.tolist()
+        active_anchor_tags = active_anchor_tags[active_anchor_tags == 1].index.tolist()
 
         if not active_anchor_tags:
             continue
 
         # 2. Select Positive: shares tag
-        different_from_anchor_mask = cat_df["song_id"] != anchor_song_id
+        different_from_anchor_mask = cat_df["artist"] != anchor_artist
         pos_tag_mask = (cat_df[active_anchor_tags] == 1).any(axis=1)
         pos_candidates = cat_df[pos_tag_mask & different_from_anchor_mask].index
 
@@ -317,10 +318,10 @@ def generate_song_clean_triplets(df_clean, category_name, category_tags, num_tri
             continue
 
         pos_id = random.choice(pos_candidates.tolist())
-        pos_song_id = cat_df.loc[pos_id, "song_id"]
+        pos_artist = cat_df.loc[pos_id, "artist"]
 
-        # 3. Select Negative: shares NO tag AND comes from a DIFFERENT song than BOTH Anchor and Positive
-        different_from_both_mask = (cat_df["song_id"] != anchor_song_id) & (cat_df["song_id"] != pos_song_id)
+        # 3. Select Negative: shares NO tag AND comes from a DIFFERENT artist than BOTH Anchor and Positive
+        different_from_both_mask = (cat_df["artist"] != anchor_artist) & (cat_df["artist"] != pos_artist)
         neg_tag_mask = (cat_df[active_anchor_tags] == 0).all(axis=1)
         neg_candidates = cat_df[neg_tag_mask & different_from_both_mask].index
 
@@ -350,6 +351,15 @@ def main():
     load_dotenv()
     DATASETS_FOLDER = os.environ["DATASETS_FOLDER"]
     df = pd.read_csv(f'{DATASETS_FOLDER}/magnatagatune/annotations_final.csv', sep='\t')
+
+    corrupted_files = ["9/american_baroque-dances_and_suites_of_rameau_and_couperin-25-le_petit_rien_xiveme_ordre_couperin-88-117.mp3", 
+                        "8/jacob_heringman-josquin_des_prez_lute_settings-19-gintzler__pater_noster-204-233.mp3",
+                        "6/norine_braun-now_and_zen-08-gently-117-146.mp3"]
+
+    #drop corrupted files
+    df = df[~df['mp3_path'].isin(corrupted_files)].copy()
+
+    clip_info_df = pd.read_csv(f'{DATASETS_FOLDER}/magnatagatune/clip_info_final.csv', sep="\t")
     
     df_clean = clean_magnatagatune_tags(df, clean_tags)
     tag_categories_clean = clean_tag_categories(tag_categories, clean_tags)
@@ -358,10 +368,10 @@ def main():
     test_benchmark = []
     for category, tags in tag_categories_clean.items():
         print(f'generating {category} triplets')
-        test_benchmark.extend(generate_song_clean_triplets(df_clean, category, tags, num_triplets=5000))
+        test_benchmark.extend(generate_song_clean_triplets(df_clean, clip_info_df, category, tags, num_triplets=5000))
 
     test_benchmark_df = pd.DataFrame(test_benchmark)
-    test_benchmark_df.to_csv(f'{DATASETS_FOLDER}/magnatagatune/mtt_test_triplets.csv', index=False)
+    test_benchmark_df.to_csv(f'{DATASETS_FOLDER}/magnatagatune/test_triplets.csv', index=False)
 
 if __name__ == "__main__":
     main()

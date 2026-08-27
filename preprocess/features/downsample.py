@@ -40,7 +40,7 @@ def worker_func(proc_id, file_chunk, features_dir, downsampled_dir, max_len=128)
 def main():
     # ----------------------------- Environment & Config ---------------------------------- #
     load_dotenv()
-    DATASETS_FOLDER = os.environ["DATASETS_FOLDER"]
+    DATASETS_FEATURES_FOLDER = os.environ["DATASETS_FEATURES_FOLDER"]
     datasets = ["jamendo", "magnatagatune"]
     models = ["clap", "mert", "muq"]
     NUM_PROCESSES = 4
@@ -48,7 +48,7 @@ def main():
     # Main loop
     for dataset in datasets:
         print(f"\nProcessing: {dataset}")
-        root_dir = os.path.join(DATASETS_FOLDER, dataset)
+        root_dir = os.path.join(DATASETS_FEATURES_FOLDER, dataset)
 
         for model in models:
             features_dir = os.path.join(root_dir, f"{model}_features")

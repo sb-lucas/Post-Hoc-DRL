@@ -1,7 +1,6 @@
 import torch
 import torch.nn as nn
 
-
 class OneLayer(nn.Module):
     """Single linear projection with residual connection, LayerNorm, GELU.
     Initialized near-identity so training starts close to the frozen embedding."""

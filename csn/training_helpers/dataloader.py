@@ -16,13 +16,13 @@ import torch.nn as nn
 import ast
 
 class TripletDataset(Dataset):
-    def __init__(self, backbone, DATASETS_FOLDER, all_songs, split, pooling):
+    def __init__(self, backbone, DATASETS_FEATURES_FOLDER, all_songs, dataset, split, pooling):
         if backbone == "mert":
-            self.embeddings_folder = f"{DATASETS_FOLDER}/jamendo/downsampled_mert_features"
+            self.embeddings_folder = os.path.join(DATASETS_FEATURES_FOLDER,f"{dataset}/downsampled_mert_features")
         elif backbone == "clap":
-            self.embeddings_folder = f"{DATASETS_FOLDER}/jamendo/downsampled_clap_features"
+            self.embeddings_folder = os.path.join(DATASETS_FEATURES_FOLDER,f"{dataset}/downsampled_clap_features")
         elif backbone == "muq":
-            self.embeddings_folder = f"{DATASETS_FOLDER}/jamendo/downsampled_muq_features"
+            self.embeddings_folder = os.path.join(DATASETS_FEATURES_FOLDER,f"{dataset}/downsampled_muq_features")
         
         self.condition_mapping = {
             'genre':0,
@@ -31,10 +31,12 @@ class TripletDataset(Dataset):
         }
 
         #pre loading all audio embeddings
-        os.makedirs("cache", exist_ok=True)
+        cache_folder = f"cache" if dataset == "jamendo" else f"cache_{dataset}"
+        os.makedirs(cache_folder, exist_ok=True)
+
 
         self.audio_cache = {}
-        cache_file_path = f"cache/cache_{backbone}_{pooling}_{split}.pt"
+        cache_file_path = f"{cache_folder}/cache_{backbone}_{pooling}_{split}.pt"
         if os.path.exists(cache_file_path):
             print("Loading pre-computed audio cache...")
             print("cache_file_path = ", cache_file_path)
@@ -66,14 +68,14 @@ class TripletDataset(Dataset):
 
 
 class TripletDatasetTrain(TripletDataset):
-    def __init__(self, backbone, DATASETS_FOLDER, pooling):
+    def __init__(self, backbone, DATASETS_FOLDER, DATASET_FEATURES_FOLDER, pooling, dataset):
         self.pooling = pooling
 
-        self.df = pd.read_csv(f"{DATASETS_FOLDER}/jamendo/jamendo_train_split.csv")
+        self.df = pd.read_csv(f"{DATASETS_FOLDER}/{dataset}/train_split.csv")
         self.artist_to_idx = {artist_id: idx for idx, artist_id in enumerate(self.df['ARTIST_ID'].unique())}
         all_songs = self.df["PATH"].tolist()
 
-        super().__init__(backbone, DATASETS_FOLDER, all_songs, "train", pooling)
+        super().__init__(backbone, DATASET_FEATURES_FOLDER, all_songs, dataset, "train", pooling)
         
         # Unique tag vocabularies per category
         self.genre_vocab = sorted(list(set([t for tags in self.df["GENRE_TAGS"] for t in ast.literal_eval(tags)])))
@@ -104,15 +106,22 @@ class TripletDatasetTrain(TripletDataset):
 
 
 class TripletDatasetVal(TripletDataset):
-    def __init__(self, backbone, DATASETS_FOLDER, pooling):
+    def __init__(self, backbone, DATASETS_FOLDER, DATASET_FEATURES_FOLDER, pooling, dataset, split):
         self.pooling = pooling
-
-        self.triplets_df = pd.read_csv(f"{DATASETS_FOLDER}/jamendo/jamendo_val_triplets.csv")
+        
+        self.triplets_df = pd.read_csv(f"{DATASETS_FOLDER}/{dataset}/{split}_triplets.csv")
         all_songs = pd.concat([self.triplets_df["anchor"], self.triplets_df["positive"], self.triplets_df["negative"]]).unique()
-        super().__init__(backbone, DATASETS_FOLDER, all_songs, "val", pooling)
+            
+        super().__init__(backbone, DATASET_FEATURES_FOLDER, all_songs, dataset, split, pooling)
 
     def __len__(self):
         return len(self.triplets_df)
+
+    def get_len(self, condition):
+        if condition == 'overall':
+            return len(self.triplets_df)
+        else:
+            return len(self.triplets_df[self.triplets_df['category'] == condition])
 
     def __getitem__(self, idx):
         row = self.triplets_df.iloc[idx]
