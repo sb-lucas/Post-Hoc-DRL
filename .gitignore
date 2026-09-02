@@ -13,3 +13,4 @@ runs-bagunça/
 *.sh
 datasets_andre/
 datasets_andre
+.vscode
