@@ -11,7 +11,11 @@ from email import parser
 #nohup python3 -u main.py --epochs 1000 --backbone clap --variation mlp --pooling attention --learn_masks
 #nohup python3 -u main.py --epochs 1000 --backbone clap --variation mlp --pooling attention 
 #nohup python3 -u main.py --epochs 1000 --backbone clap --variation mlp --pooling mean --learn_masks
-#nohup python3 -u main.py --epochs 1000 --backbone clap --variation mlp --pooling mean 
+#nohup python3 -u main.py --epochs 1000 --backbone clap --variation mlp --pooling mean
+
+
+# python3 -u main.py --epochs 1000 --backbone clap --variation teste --pooling mean 
+# python3 -u main.py --epochs 1000 --backbone clap --variation teste --pooling attention 
 
 #nohup python3 -u main.py --epochs 1000 --backbone mert --variation none --pooling attention --learn_masks
 #nohup python3 -u main.py --epochs 1000 --backbone mert --variation none --pooling mean --learn_masks

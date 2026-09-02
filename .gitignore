@@ -4,6 +4,8 @@
 __pycache__/
 csn/runs/
 runs/
+csn/runs-bagunça/
+csn/runs-final/
 datasets/
 .env
 runs-bagunça/

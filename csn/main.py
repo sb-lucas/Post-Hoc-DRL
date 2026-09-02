@@ -22,6 +22,7 @@ from training_helpers.checkpoint import save_checkpoint
 from training_helpers.plot import plot_losses
 from training_helpers.emb_to_device import emb_to_device
 
+
 def train(csn_model, dataloader, optimizer, device, semi_hard_loss_fn, l_mask=1e-5, l_ortho=1e-3, l_emb=1e-5):
     csn_model.train()
     epoch_loss = 0
@@ -112,11 +113,12 @@ def main():
 
     #--------------------------------------------------Parsing and Logging--------------------------------------------------#
     args = parse_args()
-    n_runs = 5
+    n_runs = 1
     for run in range(n_runs):
         timestamp = datetime.now().strftime("%m%d_%H%M%S")
         learn_masks_str = "learned_mask" if args.learn_masks else "fixed_mask"
-        experiment_name = f"{args.backbone}_{args.pooling}_{args.variation}_{learn_masks_str}_run_{run}"
+        #experiment_name = f"{args.backbone}_{args.pooling}_{args.variation}_{learn_masks_str}_run_{run}"
+        experiment_name = f"{args.backbone}_{args.pooling}_{args.variation}_{learn_masks_str}_{timestamp}"
         
         save_dir = os.path.join("runs", experiment_name)
         
@@ -202,8 +204,8 @@ def main():
         scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
 
         early_stop_patience = 20           
-        early_stop_counter = 0 
         early_stop_threshold = 0
+        early_stop_counter = 0 
 
         train_losses = []
         val_losses = []
