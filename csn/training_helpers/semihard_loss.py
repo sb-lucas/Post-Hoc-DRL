@@ -15,17 +15,17 @@ class SemiHardTripletLoss(nn.Module):
         """
         B = embeddings.size(0)
 
-        # 1. Pairwise L2 Distances Matrix (B, B)
+        # Pairwise L2 Distances Matrix (B, B)
         dist_matrix = torch.cdist(embeddings, embeddings, p=2)
 
-        # 2. Shared tags matrix (B, B)
+        # Shared tags matrix (B, B)
         shared_tags = torch.matmul(category_binary_tags, category_binary_tags.T)
 
         # Positive Mask: Shares >=1 tag, not self
         pos_mask = (shared_tags > 0)
         pos_mask.fill_diagonal_(False)
 
-        # 3. 2D Artist Inequality Matrix (B, B)
+        # 2D Artist Inequality Matrix (B, B)
         diff_artist_2d = artist_ids.unsqueeze(1) != artist_ids.unsqueeze(0)
         
         # Base Negative Criteria: Shares 0 tags with Anchor AND has >=1 tag in category
@@ -33,7 +33,7 @@ class SemiHardTripletLoss(nn.Module):
         neg_mask_base = (shared_tags == 0) & has_any_tag 
         neg_mask_base.fill_diagonal_(False)
 
-        # 4. Broadcast to 3D Triplet Masks (B, B, B) -> [Anchor, Positive, Negative]
+        # Broadcast to 3D Triplet Masks (B, B, B) -> [Anchor, Positive, Negative]
         d_ap = dist_matrix.unsqueeze(2).expand(-1, -1, B)  # (B, B, B)
         d_an = dist_matrix.unsqueeze(1).expand(-1, B, -1)  # (B, B, B)
 
@@ -60,7 +60,7 @@ class SemiHardTripletLoss(nn.Module):
         if active_mask.sum() == 0:
             return torch.tensor(0.0, device=embeddings.device, requires_grad=True)
 
-        # 6. Extract active distances as 1D vectors
+        # Extract active distances as 1D vectors
         d_ap_active = d_ap[active_mask]
         d_an_active = d_an[active_mask]
         target = torch.ones_like(d_an_active)

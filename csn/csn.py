@@ -20,6 +20,7 @@ class ConditionalSimNet(nn.Module):
         """ embeddingnet: The network that projects the inputs into an embedding of embedding_size
             n_conditions: Integer defining number of different similarity notions
             embedding_size: Number of dimensions of the embedding output from the embeddingnet
+            pooling: String defining the pooling method to use, either "mean" or "attention"
             learnedmask: Boolean indicating whether masks are learned or fixed
         """
         super(ConditionalSimNet, self).__init__()

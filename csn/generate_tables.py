@@ -5,26 +5,18 @@ import pandas as pd
 
 class TableGenerator:
     """Generates summary performance and specificity tables from automated music
+    tagging triplet evaluation experiments."""
 
-    tagging triplet evaluation experiments.
-    """
-
-    def __init__(
-        self,
-        results_dir="runs-final",
-        categories=["instrument", "genre", "mood"],
-    ):
+    def __init__(self, results_dir="runs-final", categories=["instrument", "genre", "mood"]):
         """Initializes the generator, loads all experiment CSVs, and constructs
+        the wide-format result DataFrame."""
 
-        the wide-format result DataFrame.
-        """
         self.results_dir = results_dir
         self.categories = categories
         self.df_all_wide = self.load_results()
 
     def load_results(self):
         """Loads triplet score CSV files across all backbone, pooling, variation,
-
         and masking configurations and pivots them into a unified wide DataFrame.
 
         What it does:
@@ -42,47 +34,29 @@ class TableGenerator:
         for pooling in ["attention", "mean"]:
             for backbone in ["muq", "clap", "mert"]:
                 for variation in ["none", "one_layer", "mlp"]:
-                    learn_masks_options = (
-                        [True] if variation == "none" else [True, False]
-                    )
+                    learn_masks_options = ([True] if variation == "none" else [True, False])
 
                     for learn_masks in learn_masks_options:
-                        learn_masks_str = (
-                            "learned_mask" if learn_masks else "fixed_mask"
-                        )
+                        learn_masks_str = ("learned_mask" if learn_masks else "fixed_mask")
 
                         for run in range(5):
                             experiment_name = f"{backbone}_{pooling}_{variation}_{learn_masks_str}_run_{run}"
-                            checkpoint_folder = os.path.join(
-                                self.results_dir, experiment_name
-                            )
+                            checkpoint_folder = os.path.join(self.results_dir, experiment_name)
 
-                            save_jamendo = os.path.join(
-                                checkpoint_folder, "triplet_scores_jamendo.csv"
-                            )
-                            save_mtt = os.path.join(
-                                checkpoint_folder, "triplet_scores_mtt.csv"
-                            )
+                            save_jamendo = os.path.join(checkpoint_folder, "triplet_scores_jamendo.csv")
+                            save_mtt = os.path.join(checkpoint_folder, "triplet_scores_mtt.csv")
 
-                            if not (
-                                os.path.exists(save_jamendo)
-                                and os.path.exists(save_mtt)
-                            ):
+                            if not (os.path.exists(save_jamendo) and os.path.exists(save_mtt)):
                                 continue
 
                             df_jamendo = pd.read_csv(save_jamendo)
                             df_mtt = pd.read_csv(save_mtt)
 
                             if df_jamendo.index.name is None:
-                                df_jamendo = df_jamendo.set_index(
-                                    df_jamendo.columns[0]
-                                )
+                                df_jamendo = df_jamendo.set_index(df_jamendo.columns[0])
                                 df_mtt = df_mtt.set_index(df_mtt.columns[0])
 
-                            for dataset_name, df_run in [
-                                ("Jamendo", df_jamendo),
-                                ("MTT", df_mtt),
-                            ]:
+                            for dataset_name, df_run in [("Jamendo", df_jamendo), ("MTT", df_mtt)]:
                                 for mask_name in df_run.index:
                                     for col in df_run.columns:
                                         records.append(
@@ -102,21 +76,10 @@ class TableGenerator:
                                         )
 
         df_all = pd.DataFrame(records)
-        index_cols = [
-            "Backbone",
-            "Pooling",
-            "Variation",
-            "Learn Masks",
-            "Run",
-            "Mask",
-        ]
+        index_cols = ["Backbone", "Pooling", "Variation", "Learn Masks", "Run", "Mask"]
 
-        df_wide = df_all.pivot(
-            index=index_cols, columns=["Dataset", "Metric"], values="value"
-        )
-        df_wide.columns = [
-            f"{dataset.lower()}_{metric}" for dataset, metric in df_wide.columns
-        ]
+        df_wide = df_all.pivot(index=index_cols, columns=["Dataset", "Metric"], values="value")
+        df_wide.columns = [f"{dataset.lower()}_{metric}" for dataset, metric in df_wide.columns]
         df_wide = df_wide.reset_index()
         df_wide.columns.name = None
 
@@ -160,15 +123,10 @@ class TableGenerator:
                         continue
 
                     mask_row = group_indexed.loc[attr]
-                    own_effect = float(
-                        mask_row[col_name] - backbone_row[col_name]
-                    )
+                    own_effect = float(mask_row[col_name] - backbone_row[col_name])
 
                     cross_effects = [
-                        float(
-                            mask_row[f"{dataset}_{a}"]
-                            - backbone_row[f"{dataset}_{a}"]
-                        )
+                        float(mask_row[f"{dataset}_{a}"] - backbone_row[f"{dataset}_{a}"])
                         for a in self.categories
                         if a != attr and f"{dataset}_{a}" in group_indexed.columns
                     ]
@@ -197,24 +155,13 @@ class TableGenerator:
             return pd.DataFrame()
 
         df_overall_runs = (
-            df_spec_runs.groupby(
-                [
-                    "Dataset",
-                    "Backbone",
-                    "Pooling",
-                    "Variation",
-                    "Learn Masks",
-                    "Run",
-                ]
-            )["specificity"]
+            df_spec_runs.groupby(["Dataset", "Backbone", "Pooling", "Variation", "Learn Masks", "Run"])["specificity"]
             .mean()
             .reset_index()
         )
 
         df_agg = (
-            df_overall_runs.groupby(
-                ["Backbone", "Pooling", "Variation", "Learn Masks", "Dataset"]
-            )["specificity"]
+            df_overall_runs.groupby(["Backbone", "Pooling", "Variation", "Learn Masks", "Dataset"])["specificity"]
             .agg(["mean", "std"])
             .reset_index()
         )
@@ -254,14 +201,7 @@ class TableGenerator:
         )
         df_filtered = self.df_all_wide[filter_mask]
 
-        id_cols = [
-            "Backbone",
-            "Pooling",
-            "Variation",
-            "Learn Masks",
-            "Run",
-            "Mask",
-        ]
+        id_cols = ["Backbone", "Pooling", "Variation", "Learn Masks", "Run", "Mask"]
         metric_cols = [col for col in df_filtered.columns if col not in id_cols]
 
         return (
@@ -282,17 +222,11 @@ class TableGenerator:
             pd.DataFrame: Columns for Backbone, Pooling, Variation, Learn Masks,
             jamendo_macro_avg_mean, jamendo_macro_avg_std, mtt_macro_avg_mean, and mtt_macro_avg_std.
         """
-        df_filtered = self.df_all_wide[
-            self.df_all_wide["Mask"].isin(self.categories)
-        ].copy()
+        df_filtered = self.df_all_wide[self.df_all_wide["Mask"].isin(self.categories)].copy()
 
         conds = [df_filtered["Mask"] == cat for cat in self.categories]
-        df_filtered["jamendo_score"] = np.select(
-            conds, [df_filtered[f"jamendo_{cat}"] for cat in self.categories]
-        )
-        df_filtered["mtt_score"] = np.select(
-            conds, [df_filtered[f"mtt_{cat}"] for cat in self.categories]
-        )
+        df_filtered["jamendo_score"] = np.select(conds, [df_filtered[f"jamendo_{cat}"] for cat in self.categories])
+        df_filtered["mtt_score"] = np.select(conds, [df_filtered[f"mtt_{cat}"] for cat in self.categories])
 
         run_cols = ["Backbone", "Pooling", "Variation", "Learn Masks", "Run"]
         df_run_avg = (
@@ -308,16 +242,9 @@ class TableGenerator:
             .reset_index()
         )
 
-        df_final.columns = [
-            "Backbone",
-            "Pooling",
-            "Variation",
-            "Learn Masks",
-            "jamendo_macro_avg_mean",
-            "jamendo_macro_avg_std",
-            "mtt_macro_avg_mean",
-            "mtt_macro_avg_std",
-        ]
+        df_final.columns = ["Backbone", "Pooling", "Variation", "Learn Masks", "jamendo_macro_avg_mean", 
+                            "jamendo_macro_avg_std", "mtt_macro_avg_mean", "mtt_macro_avg_std"]
+        
         return df_final
 
     def baseline_triplet_performance(self):
@@ -349,30 +276,18 @@ class TableGenerator:
         jamendo_cols = [f"jamendo_{cat}" for cat in self.categories]
         mtt_cols = [f"mtt_{cat}" for cat in self.categories]
 
-        df_filtered["jamendo_macro_avg"] = df_filtered[jamendo_cols].mean(
-            axis=1
-        )
+        df_filtered["jamendo_macro_avg"] = df_filtered[jamendo_cols].mean(axis=1)
         df_filtered["mtt_macro_avg"] = df_filtered[mtt_cols].mean(axis=1)
 
         group_cols = ["Backbone", "Pooling", "Variation", "Learn Masks"]
         df_backbone_unmasked = (
-            df_filtered.groupby(group_cols)[
-                ["jamendo_macro_avg", "mtt_macro_avg"]
-            ]
+            df_filtered.groupby(group_cols)[["jamendo_macro_avg", "mtt_macro_avg"]]
             .agg(["mean", "std"])
             .reset_index()
         )
 
-        df_backbone_unmasked.columns = [
-            "Backbone",
-            "Pooling",
-            "Variation",
-            "Learn Masks",
-            "jamendo_macro_avg_mean",
-            "jamendo_macro_avg_std",
-            "mtt_macro_avg_mean",
-            "mtt_macro_avg_std",
-        ]
+        df_backbone_unmasked.columns = ["Backbone", "Pooling", "Variation", "Learn Masks", "jamendo_macro_avg_mean", 
+                                        "jamendo_macro_avg_std", "mtt_macro_avg_mean", "mtt_macro_avg_std"]
 
         return df_backbone_unmasked
     
@@ -389,6 +304,7 @@ class TableGenerator:
                 (mean and std across 5 runs) for both unmasked baseline backbones and
                 trained masked model configurations.
             """
+            
             df_baseline = self.baseline_triplet_performance()
             df_trained = self.trained_triplet_performance()
 

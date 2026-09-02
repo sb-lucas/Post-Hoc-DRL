@@ -16,7 +16,6 @@ clean_name = {
 }
 
 def generate_triplets(df, category_name, num_triplets=5000):
-
     # Keep tracks containing at least one tag in this category
     cat_df = df[df[category_name].apply(lambda tags: len(tags) > 0)].copy()
     cat_df["tag_set"] = cat_df[category_name].apply(set)

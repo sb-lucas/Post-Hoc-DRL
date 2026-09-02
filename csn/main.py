@@ -28,25 +28,24 @@ def train(csn_model, dataloader, optimizer, device, semi_hard_loss_fn, l_mask=1e
     epoch_loss = 0
 
     for batch_idx, (emb, i_vec, g_vec, m_vec, artist_ids) in enumerate(dataloader):
-        #print(f"Training Online - Batch {batch_idx+1}/{len(dataloader)}", end="\r")
+        print(f"Training Online - Batch {batch_idx+1}/{len(dataloader)}", end="\r")
 
         emb = emb_to_device(emb, device)
         i_vec, g_vec, m_vec = (i_vec.to(device), g_vec.to(device), m_vec.to(device))
         artist_ids = artist_ids.to(device)
         B = emb[0].size(0)
 
-        # 1. Condition Tensors: 0=genre, 1=instrument, 2=mood
+        # Condition Tensors: 0=genre, 1=instrument, 2=mood
         c_genre = torch.full((B,), 0, dtype=torch.long, device=device)
         c_inst = torch.full((B,), 1, dtype=torch.long, device=device)
         c_mood = torch.full((B,), 2, dtype=torch.long, device=device)
 
-        # 2. Single forward pass per condition on the same unmasked embedding batch
-        
+        # Single forward pass per condition on the same unmasked embedding batch
         masked_emb_g, mask_g, emb_g = csn_model(emb, c_genre)
         masked_emb_i, mask_i, emb_i = csn_model(emb, c_inst)
         masked_emb_m, mask_m, emb_m = csn_model(emb, c_mood)
 
-        # 3. Compute GPU semi-hard triplet loss per dimension
+        # Compute GPU semi-hard triplet loss per dimension
         triplet_loss_genre = semi_hard_loss_fn(masked_emb_g, g_vec, artist_ids)
         triplet_loss_inst = semi_hard_loss_fn(masked_emb_i, i_vec, artist_ids)
         triplet_loss_mood = semi_hard_loss_fn(masked_emb_m, m_vec, artist_ids)
@@ -62,7 +61,7 @@ def train(csn_model, dataloader, optimizer, device, semi_hard_loss_fn, l_mask=1e
         I = torch.eye(M.shape[0], device=M.device)
         loss_ortho = ((M @ M.T - I) ** 2).sum()
 
-        # 5. Combined Loss
+        # Combined Loss
         total_loss = (triplet_loss + (mask_norm * l_mask) + (loss_ortho * l_ortho) + (emb_norm * l_emb))
 
         optimizer.zero_grad()
@@ -70,7 +69,6 @@ def train(csn_model, dataloader, optimizer, device, semi_hard_loss_fn, l_mask=1e
         optimizer.step()
 
         epoch_loss += total_loss.item()
-    
 
     return epoch_loss / len(dataloader)
 
@@ -80,7 +78,7 @@ def test(csn_model, dataloader, device, triplet_loss_fn, l_mask=1e-5, l_ortho=1e
     epoch_loss = 0
 
     for batch_index, (anchor, negative, positive, condition) in enumerate(dataloader):
-        #print(f"Testing - Batch {batch_index+1}/{len(dataloader)}", end='\r')
+        print(f"Testing - Batch {batch_index+1}/{len(dataloader)}", end='\r')
 
         #to device
         anchor = emb_to_device(anchor, device)
@@ -115,15 +113,12 @@ def main():
     args = parse_args()
     n_runs = 1
     for run in range(n_runs):
-        timestamp = datetime.now().strftime("%m%d_%H%M%S")
         learn_masks_str = "learned_mask" if args.learn_masks else "fixed_mask"
-        #experiment_name = f"{args.backbone}_{args.pooling}_{args.variation}_{learn_masks_str}_run_{run}"
-        experiment_name = f"{args.backbone}_{args.pooling}_{args.variation}_{learn_masks_str}_{timestamp}"
+        experiment_name = f"{args.backbone}_{args.pooling}_{args.variation}_{learn_masks_str}_run_{run}"
         
         save_dir = os.path.join("runs", experiment_name)
         
         print(f"\n\nStarting Experiment {experiment_name}/{n_runs}...\n")
-
 
         #if the directory exists, the experiment has already started
         if os.path.exists(save_dir):
