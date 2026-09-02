@@ -59,4 +59,4 @@ For training, the main training script is `csn/main.py`. Run it with the followi
 | `--pooling`      | Pooling method: `mean` or `attention`               | **Required** |
 | `--learn_masks`  | Enable learning of masks                            |      `False` |
 
-Finally, run `evaluate.py` to evaluate the trained models on the two test sets. Then, run `generate_tables.py` to reproduce the tables from the paper.
+Finally, use `evaluate.py` to evaluate the trained models on the two test sets. Then, run `generate_tables.py` to reproduce the tables from the paper.
