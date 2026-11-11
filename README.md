@@ -1,6 +1,6 @@
 # Exploring Post-Hoc Disentanglement of Audio Foundation Models for Music Similarity
 
-Official repository for the 2026 LAMIR paper, Exploring Post-Hoc Disentanglement of Audio Foundation Models for Music Similarity.
+Official repository for the 2026 LAMIR paper, [Exploring Post-Hoc Disentanglement of Audio Foundation Models for Music Similarity]([url](https://arxiv.org/abs/2611.14415)).
 
 ## Description
 This work investigates post-hoc disentanglement of pretrained audio foundation models using Conditional Similarity Networks (CSN). We adapt CSN to gate frozen CLAP, MuQ, and MERT embeddings, evaluating lightweight adaptation and masking strategies across two music similarity datasets.
